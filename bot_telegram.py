@@ -54,6 +54,8 @@ def handle(msg):
             bot.sendMessage(chat_id, '⚠️ Debes indicar un destino.')
             return
         host = parts[1]
+        # Mensaje de espera
+        bot.sendMessage(chat_id, f'🔎 Determinando latencia y saltos hacia {host}... Por favor espera.')
         latency, _ = ping_host(host)
         hops, _ = traceroute_host(host)
         publish_result(latency, hops, host)
