@@ -1,4 +1,5 @@
 import paho.mqtt.client as mqtt
+import json
 from config import MQTT_BROKER, MQTT_PORT, MQTT_TOPIC, MQTT_USER, MQTT_PASSWORD
 
 def publish_result(latency, hops, destino):
@@ -6,12 +7,19 @@ def publish_result(latency, hops, destino):
     if MQTT_USER and MQTT_PASSWORD:
         client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    
+    # Asegurar que latency y hops sean números enteros para los gráficos
+    latency_int = int(latency) if latency is not None else None
+    hops_int = int(hops) if hops is not None else None
+    
     payload = {
         'destino': destino,
-        'latencia': latency,
-        'saltos': hops
+        'latencia': latency_int,
+        'saltos': hops_int
     }
-    client.publish(MQTT_TOPIC, str(payload))
+    
+    # Enviar como JSON válido para que MQTT Explorer pueda generar gráficos
+    client.publish(MQTT_TOPIC, json.dumps(payload))
     client.disconnect()
 
 def subscribe_and_forward(bot, chat_id):

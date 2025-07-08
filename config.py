@@ -1,5 +1,5 @@
 # Configuración de tokens y credenciales
-TELEGRAM_TOKEN = '7680075924:AAHxz55JaYrS6s8D7FzXNR3_QKI4S74Gt24'
+TELEGRAM_TOKEN = '7925410041:AAE31bz_bGB2p7UGDnUUmZD5pJBQvGPUNHc'
 MQTT_BROKER = 'localhost'
 MQTT_PORT = 1883
 MQTT_TOPIC = 'mensaje_grupo'

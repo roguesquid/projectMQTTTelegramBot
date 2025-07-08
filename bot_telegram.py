@@ -6,6 +6,8 @@ from mqtt_client import publish_result, subscribe_and_forward
 from monitoring_service import MonitoringService
 import threading
 from datetime import datetime
+import time
+from telegram import Bot as PTGBot
 
 monitoring_services = {}
 bot = telepot.Bot(TELEGRAM_TOKEN)
@@ -55,27 +57,91 @@ def handle(msg):
             return
         host = parts[1]
         # Mensaje de espera
-        bot.sendMessage(chat_id, f'🔎 Determinando latencia y saltos hacia {host}... Por favor espera.')
+        try:
+            bot.sendMessage(chat_id, f'🔎 Determinando latencia y saltos hacia {host}... Por favor espera.')
+        except Exception as e:
+            print(f"[ERROR] Al enviar mensaje de espera a Telegram: {e}")
         latency, _ = ping_host(host)
         hops, _ = traceroute_host(host)
-        publish_result(latency, hops, host)
-        bot.sendMessage(chat_id, f"📡 Resultado para {host}:\n- Latencia promedio: {latency} ms ⏱️\n- Saltos: {hops} 🛣️")
+        # Validación robusta para evitar None o tipos inesperados
+        if latency is None or not isinstance(latency, (int, float)):
+            latency_str = "No disponible"
+        else:
+            latency_str = str(latency)
+        if hops is None or not isinstance(hops, (int, float)):
+            hops_str = "No disponible"
+        else:
+            hops_str = str(hops)
+        time.sleep(1)
+        # Envío asíncrono con python-telegram-bot
+        import asyncio
+        async def enviar_resultado():
+            ptg_bot = PTGBot(token=TELEGRAM_TOKEN)
+            await ptg_bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    f"✅ <b>Resultado para <code>{host}</code></b>\n"
+                    f"⏱️ <b>Latencia:</b> <code>{latency_str} ms</code>\n"
+                    f"🛣️ <b>Saltos:</b> <code>{hops_str}</code>"
+                ),
+                parse_mode='HTML'
+            )
+        try:
+            asyncio.run(enviar_resultado())
+        except Exception as e:
+            print(f"[ERROR] Al enviar resultado a Telegram (python-telegram-bot): {e}")
+        try:
+            publish_result(latency, hops, host)
+        except Exception as e:
+            print(f"[ERROR] Al publicar en MQTT: {e}")
     elif text.startswith('/monitorear'):
         parts = text.split()
         if len(parts) < 2:
             bot.sendMessage(chat_id, '⚠️ Debes indicar un destino.')
             return
         host = parts[1]
+        # Permitir umbral opcional: /monitorear <host> [umbral_ms]
+        latency_threshold = None
+        if len(parts) >= 3:
+            try:
+                latency_threshold = int(parts[2])
+            except ValueError:
+                bot.sendMessage(chat_id, '⚠️ El umbral debe ser un número entero (ms).')
+                return
         if host in monitoring_services:
             bot.sendMessage(chat_id, 'ℹ️ Ya se está monitoreando este destino.')
             return
         def result_callback(destino, latency, hops):
-            publish_result(latency, hops, destino)
-            bot.sendMessage(chat_id, f"📊 [Monitoreo] {destino}:\n- Latencia: {latency} ms ⏱️\n- Saltos: {hops} 🛣️")
-        service = MonitoringService(host, alert_callback=send_alert, result_callback=result_callback)
+            latency_str = f"{latency} ms" if latency is not None else "No disponible"
+            hops_str = f"{hops}" if hops is not None else "No disponible"
+            # Envío bonito y asíncrono con python-telegram-bot
+            import asyncio
+            async def enviar_monitoreo():
+                ptg_bot = PTGBot(token=TELEGRAM_TOKEN)
+                await ptg_bot.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"📊 <b>[Monitoreo] <code>{destino}</code></b>\n"
+                        f"⏱️ <b>Latencia:</b> <code>{latency_str}</code>\n"
+                        f"🛣️ <b>Saltos:</b> <code>{hops_str}</code>"
+                    ),
+                    parse_mode='HTML'
+                )
+            try:
+                asyncio.run(enviar_monitoreo())
+            except Exception as e:
+                print(f"[ERROR] Al enviar resultado de monitoreo a Telegram (PTB): {e}")
+            try:
+                publish_result(latency, hops, destino)
+            except Exception as e:
+                print(f"[ERROR] Al publicar en MQTT (monitoreo): {e}")
+        service = MonitoringService(host, alert_callback=send_alert, result_callback=result_callback, latency_threshold=latency_threshold)
         monitoring_services[host] = service
         service.start()
-        bot.sendMessage(chat_id, f'🔄 Monitoreo iniciado para {host}.')
+        if latency_threshold is not None:
+            bot.sendMessage(chat_id, f'🔄 Monitoreo iniciado para {host} con alerta si latencia > {latency_threshold} ms.')
+        else:
+            bot.sendMessage(chat_id, f'🔄 Monitoreo iniciado para {host}.')
     elif text.startswith('/detener'):
         parts = text.split()
         if len(parts) < 2:
@@ -91,9 +157,14 @@ def handle(msg):
     else:
         bot.sendMessage(chat_id, '❓ Comando no reconocido. Usa /start para ver las opciones.')
 
-def send_alert(destino):
+def send_alert(destino, latency=None, reason=None):
     if last_chat_id:
-        bot.sendMessage(last_chat_id, f'🚨 ALERTA: El host {destino} está inalcanzable.')
+        if reason == 'umbral' and latency is not None:
+            bot.sendMessage(last_chat_id, f'🚨 ALERTA: Latencia alta en {destino}: {latency} ms supera el umbral.')
+        elif reason == 'inaccesible':
+            bot.sendMessage(last_chat_id, f'🚨 ALERTA: El host {destino} está inalcanzable.')
+        else:
+            bot.sendMessage(last_chat_id, f'🚨 ALERTA: Evento detectado en {destino}.')
 
 def main():
     MessageLoop(bot, handle).run_as_thread()
