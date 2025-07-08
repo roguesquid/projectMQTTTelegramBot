@@ -208,6 +208,50 @@ def handle(msg):
             bot.sendMessage(chat_id, f'⏹️ Monitoreo detenido para {host}.')
         else:
             bot.sendMessage(chat_id, 'ℹ️ No se estaba monitoreando ese destino.')
+    elif text.startswith('/alerta'):
+        parts = text.split()
+        if len(parts) < 3:
+            bot.sendMessage(chat_id, '⚠️ Debes indicar un destino y un umbral. Ejemplo: /alerta 8.8.8.8 150')
+            return
+        host = parts[1]
+        try:
+            latency_threshold = int(parts[2])
+        except ValueError:
+            bot.sendMessage(chat_id, '⚠️ El umbral debe ser un número entero (ms).')
+            return
+        if host in monitoring_services:
+            bot.sendMessage(chat_id, 'ℹ️ Ya se está monitoreando este destino.')
+            return
+
+        def alert_callback(destino, latency=None, reason=None):
+            if reason == 'umbral' and latency is not None:
+                bot.sendMessage(chat_id, f'🚨 ALERTA: Latencia alta en {destino}: {latency} ms supera el umbral de {latency_threshold} ms.')
+            elif reason == 'inaccesible':
+                bot.sendMessage(chat_id, f'🚨 ALERTA: El host {destino} está inalcanzable.')
+
+        service = MonitoringService(
+            host,
+            alert_callback=alert_callback,
+            result_callback=None,
+            latency_threshold=latency_threshold,
+            ping_interval=5,
+            traceroute_interval=60
+        )
+        monitoring_services[host] = service
+        service.start()
+        bot.sendMessage(chat_id, f'🚦 Alerta activada para {host}. Se notificará cada vez que la latencia supere {latency_threshold} ms o el host sea inalcanzable.\nUsa /detener_alerta {host} para detener la alerta.')
+    elif text.startswith('/detener_alerta'):
+        parts = text.split()
+        if len(parts) < 2:
+            bot.sendMessage(chat_id, '⚠️ Debes indicar un destino. Ejemplo: /detener_alerta 8.8.8.8')
+            return
+        host = parts[1]
+        service = monitoring_services.pop(host, None)
+        if service:
+            service.stop()
+            bot.sendMessage(chat_id, f'⏹️ Alerta detenida para {host}.')
+        else:
+            bot.sendMessage(chat_id, 'ℹ️ No se estaba monitoreando alerta para ese destino.')
     else:
         bot.sendMessage(chat_id, '❓ Comando no reconocido. Usa /start para ver las opciones.')
 
