@@ -80,6 +80,9 @@ def handle(msg):
         def result_callback(destino, latency, hops):
             if resultado['enviado']:
                 return
+            # Esperar a que ambos estén disponibles
+            if latency is None or hops is None:
+                return
             resultado['enviado'] = True
             latency_str = f"{latency} ms" if latency is not None else "No disponible"
             hops_str = f"{hops}" if hops is not None else "No disponible"
@@ -105,8 +108,6 @@ def handle(msg):
                 publish_result(latency, hops, host)
             except Exception as e:
                 print(f"[ERROR] Al publicar en MQTT: {e}")
-            # Detener el servicio tras el primer resultado
-            service.stop()
         service = MonitoringService(
             host,
             interval=1,  # Solo necesitamos un ciclo
@@ -117,11 +118,6 @@ def handle(msg):
             traceroute_interval=0.1
         )
         service.start()
-        # Esperar a que termine (máximo 90s por seguridad)
-        for _ in range(90):
-            if resultado['enviado']:
-                break
-            time.sleep(1)
     elif text.startswith('/monitorear'):
         parts = text.split()
         if len(parts) < 2:
@@ -153,7 +149,13 @@ def handle(msg):
         if host in monitoring_services:
             bot.sendMessage(chat_id, 'ℹ️ Ya se está monitoreando este destino.')
             return
+        first_sent = {'value': False}  # Control para el primer mensaje
         def result_callback(destino, latency, hops):
+            # Esperar a que al menos uno esté disponible para el primer mensaje
+            if not first_sent['value']:
+                if latency is None and hops is None:
+                    return
+                first_sent['value'] = True
             latency_str = f"{latency} ms" if latency is not None else "No disponible"
             hops_str = f"{hops}" if hops is not None else "No disponible"
             umbral_str = f"\n🚦 <b>Umbral:</b> <code>{latency_threshold} ms</code>" if latency_threshold is not None else ""
